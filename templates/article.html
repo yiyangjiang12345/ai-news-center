@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ article.title }} - 博查AI资讯中心</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 导航栏 -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center">
+                        <a href="/" class="flex items-center">
+                            <i class="fas fa-robot text-2xl text-blue-600 mr-2"></i>
+                            <h1 class="text-xl font-bold text-gray-900">AI咨询中心</h1>
+                        </a>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-gray-600 hover:text-gray-900 flex items-center">
+                        <i class="fas fa-arrow-left mr-2"></i>
+                        返回首页
+                    </a>
+                    <div class="text-sm text-gray-500">
+                        <i class="fas fa-clock mr-1"></i>
+                        <span>{{ article.time }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主要内容区域 -->
+    <main class="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <!-- 面包屑导航 -->
+        <nav class="flex mb-6" aria-label="Breadcrumb">
+            <ol class="inline-flex items-center space-x-1 md:space-x-3">
+                <li class="inline-flex items-center">
+                    <a href="/" class="inline-flex items-center text-sm font-medium text-gray-700 hover:text-blue-600">
+                        <i class="fas fa-home mr-2"></i>
+                        首页
+                    </a>
+                </li>
+                <li>
+                    <div class="flex items-center">
+                        <i class="fas fa-chevron-right text-gray-400 mx-2"></i>
+                        <span class="text-sm font-medium text-gray-500">文章详情</span>
+                    </div>
+                </li>
+            </ol>
+        </nav>
+
+        <!-- 文章卡片 -->
+        <article class="bg-white rounded-lg shadow-sm border overflow-hidden">
+            <!-- 文章头部 -->
+            <div class="p-6 border-b">
+                <div class="flex items-center justify-between mb-4">
+                    <span class="category-badge category-{{ article.category }}">
+                        <i class="fas fa-tag mr-1"></i>
+                        {{ article.category }}
+                    </span>
+                    <div class="text-sm text-gray-500">
+                        <i class="fas fa-newspaper mr-1"></i>
+                        <span>{{ article.source }}</span>
+                    </div>
+                </div>
+                
+                <h1 class="text-3xl font-bold text-gray-900 mb-4 leading-tight">
+                    {{ article.title }}
+                </h1>
+                
+                <div class="flex items-center text-sm text-gray-500 space-x-4">
+                    <div class="flex items-center">
+                        <i class="fas fa-clock mr-1"></i>
+                        <span>{{ article.time }}</span>
+                    </div>
+                    <div class="flex items-center">
+                        <i class="fas fa-eye mr-1"></i>
+                        <span id="viewCount">正在加载...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 文章内容 -->
+            <div class="p-6">
+                <div class="prose max-w-none">
+                    <p class="text-lg text-gray-700 leading-relaxed mb-6">
+                        {{ article.summary }}
+                    </p>
+                    
+                    {% if article.url %}
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                        <div class="flex items-start">
+                            <i class="fas fa-external-link-alt text-blue-600 mt-1 mr-3"></i>
+                            <div class="flex-1">
+                                <h3 class="text-sm font-medium text-blue-900 mb-1">原文链接</h3>
+                                <p class="text-sm text-blue-700 mb-3">{{ article.url }}</p>
+                                <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" 
+                                   class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors duration-200">
+                                    <i class="fas fa-external-link-alt mr-2"></i>
+                                    查看原文
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 文章底部 -->
+            <div class="px-6 py-4 bg-gray-50 border-t">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <button onclick="shareArticle()" class="flex items-center text-gray-600 hover:text-blue-600 transition-colors duration-200">
+                            <i class="fas fa-share mr-2"></i>
+                            分享
+                        </button>
+                        <button onclick="copyLink()" class="flex items-center text-gray-600 hover:text-blue-600 transition-colors duration-200">
+                            <i class="fas fa-link mr-2"></i>
+                            复制链接
+                        </button>
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        <i class="fas fa-heart mr-1"></i>
+                        <span id="likeCount">0</span>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <!-- 相关文章推荐 -->
+        <div class="mt-8">
+            <h2 class="text-2xl font-bold text-gray-900 mb-6">相关文章</h2>
+            <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3" id="relatedArticles">
+                <!-- 相关文章将在这里动态加载 -->
+            </div>
+        </div>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-white border-t mt-12">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div class="text-center text-gray-500">
+                <p>&copy; 2024 AI咨询中心. 数据来源：<a href="https://bocha.ai" target="_blank" class="text-blue-600 hover:text-blue-800">博查AI</a></p>
+                <p class="mt-2 text-sm">实时更新 · 专业分析 · 权威发布</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // 文章详情页面JavaScript
+        document.addEventListener('DOMContentLoaded', function() {
+            // 模拟浏览量
+            const viewCount = Math.floor(Math.random() * 1000) + 100;
+            document.getElementById('viewCount').textContent = viewCount.toLocaleString();
+            
+            // 加载相关文章
+            loadRelatedArticles();
+        });
+
+        function shareArticle() {
+            if (navigator.share) {
+                navigator.share({
+                    title: '{{ article.title }}',
+                    text: '{{ article.summary }}',
+                    url: window.location.href
+                });
+            } else {
+                copyLink();
+                alert('链接已复制到剪贴板！');
+            }
+        }
+
+        function copyLink() {
+            navigator.clipboard.writeText(window.location.href).then(function() {
+                // 可以添加一个提示
+                console.log('链接已复制');
+            });
+        }
+
+        function loadRelatedArticles() {
+            // 获取当前文章ID
+            const currentArticleId = window.location.pathname.split('/').pop();
+            
+            // 调用API获取相关文章
+            fetch(`/api/related-articles/${currentArticleId}`)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success && result.data.length > 0) {
+                        const container = document.getElementById('relatedArticles');
+                        container.innerHTML = result.data.map(article => `
+                            <div class="news-card fade-in cursor-pointer hover:shadow-lg transition-all duration-200" onclick="window.location.href='${article.url}'">
+                                <div class="news-card-header">
+                                    <div class="flex justify-between items-start mb-3">
+                                        <span class="category-badge category-${article.category}">
+                                            <i class="fas fa-tag mr-1"></i> ${article.category}
+                                        </span>
+                                        <div class="text-xs text-gray-400">
+                                            <i class="fas fa-arrow-right"></i>
+                                        </div>
+                                    </div>
+                                    <div class="text-xs text-gray-500 mb-2">
+                                        <i class="fas fa-newspaper mr-1"></i>
+                                        <span>${article.source}</span>
+                                    </div>
+                                    <h3 class="news-title hover:text-blue-600 transition-colors duration-200">
+                                        ${article.title}
+                                    </h3>
+                                </div>
+                                <div class="news-card-body">
+                                    <p class="news-summary">${article.summary}</p>
+                                </div>
+                                <div class="news-card-footer">
+                                    <div class="news-time">
+                                        <i class="fas fa-clock mr-2"></i>
+                                        ${article.time}
+                                    </div>
+                                    <div class="text-xs text-gray-400">
+                                        点击查看详情
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        // 如果没有相关文章，显示提示
+                        const container = document.getElementById('relatedArticles');
+                        container.innerHTML = `
+                            <div class="col-span-full text-center py-8">
+                                <i class="fas fa-newspaper text-4xl text-gray-300 mb-4"></i>
+                                <p class="text-gray-500">暂无相关文章</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    console.error('加载相关文章失败:', error);
+                    const container = document.getElementById('relatedArticles');
+                    container.innerHTML = `
+                        <div class="col-span-full text-center py-8">
+                            <i class="fas fa-exclamation-triangle text-4xl text-yellow-300 mb-4"></i>
+                            <p class="text-gray-500">加载相关文章失败</p>
+                        </div>
+                    `;
+                });
+        }
+    </script>
+</body>
+</html> 

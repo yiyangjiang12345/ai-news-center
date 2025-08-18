@@ -1,0 +1,26 @@
+# Python bytecode/cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+ai_news_env/
+
+# Local environment and secrets
+.env
+
+# Logs and PIDs
+*.log
+*.pid
+start.log
+app.log
+
+# Editor/OS files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Node/Front-end caches (if any)
+node_modules/
+*.cache

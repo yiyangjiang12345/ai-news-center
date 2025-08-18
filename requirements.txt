@@ -1,0 +1,12 @@
+Flask==3.1.1
+Flask-CORS==6.0.1
+requests==2.32.4
+python-dotenv==1.1.0
+
+# 生产部署可选
+gunicorn==23.0.0
+
+# 火山引擎 SDK（Ark）
+volcengine-python-sdk[ark]>=4.0.2
+
+# 说明：此前的 openai/langchain 系列依赖已移除（当前代码未使用，且版本存在冲突）
