@@ -1,12 +1,18 @@
-from flask import Flask, render_template, jsonify, request, abort
+from flask import Flask, render_template, jsonify, request, abort, Response
 from flask_cors import CORS
 import requests
 import json
 from datetime import datetime, timedelta
+import math
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 import os
 from dotenv import load_dotenv
 import threading
 import time
+from queue import Queue
 
 # 加载环境变量
 load_dotenv()
@@ -17,6 +23,18 @@ CORS(app)
 # 全局变量存储文章数据
 articles_cache = {}
 current_articles = []
+_sse_listeners = set()
+
+def _sse_notify(event_type: str, payload: dict):
+    try:
+        message = {"type": event_type, **payload}
+        for q in list(_sse_listeners):
+            try:
+                q.put_nowait(message)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 # 配置博查AI API（不提供默认值，避免泄露）
 BOCHA_API_KEY = os.getenv('BOCHA_API_KEY')
@@ -49,6 +67,39 @@ class BochaNewsService:
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
         }
+        # 后台刷新配置（起始时间与间隔小时），通过环境变量设置
+        # 支持三种方式：
+        # 1) NEWS_REFRESH_START_TIME=HH:MM（优先）
+        # 2) NEWS_REFRESH_START_HOUR、NEWS_REFRESH_START_MINUTE
+        # 3) 若未配置分钟则按 00 分钟
+        self.refresh_start_hour = self._parse_int(os.getenv('NEWS_REFRESH_START_HOUR', '0'), 0)
+        self.refresh_start_minute = self._parse_int(os.getenv('NEWS_REFRESH_START_MINUTE', '0'), 0)
+        start_time_str = os.getenv('NEWS_REFRESH_START_TIME')
+        if start_time_str and ':' in start_time_str:
+            parts = start_time_str.split(':', 1)
+            self.refresh_start_hour = self._parse_int(parts[0], self.refresh_start_hour)
+            self.refresh_start_minute = self._parse_int(parts[1], self.refresh_start_minute)
+        # 合法性校验
+        if self.refresh_start_hour < 0 or self.refresh_start_hour > 23:
+            self.refresh_start_hour = 0
+        if self.refresh_start_minute < 0 or self.refresh_start_minute > 59:
+            self.refresh_start_minute = 0
+        self.refresh_interval_hours = max(1, self._parse_int(os.getenv('NEWS_REFRESH_INTERVAL_HOURS', '4'), 4))
+        # 时区（可选）。例如：Asia/Shanghai、UTC
+        self.refresh_tz_name = os.getenv('NEWS_REFRESH_TZ')
+        self.refresh_tz = None
+        if self.refresh_tz_name and ZoneInfo is not None:
+            try:
+                self.refresh_tz = ZoneInfo(self.refresh_tz_name)
+            except Exception:
+                self.refresh_tz = None
+    
+    # ==== 时间工具：按照配置时区返回当前时间 ====
+    def _now_dt(self):
+        return datetime.now(self.refresh_tz) if self.refresh_tz else datetime.now()
+
+    def _now_str(self):
+        return self._now_dt().strftime('%Y-%m-%d %H:%M:%S')
     
     def get_ai_news(self, force_refresh=False):
         """获取今日AI咨询"""
@@ -56,7 +107,7 @@ class BochaNewsService:
         
         try:
             print("正在调用博查AI API获取AI新闻...")
-            current_date = datetime.now().strftime("%Y-%m-%d")
+            current_date = self._now_dt().strftime("%Y-%m-%d")
             
             # 使用include参数指定搜索网站范围
             include_sites = "sohu.com|news.ifeng.com|36kr.com|techcrunch.com|venturebeat.com|theverge.com|arstechnica.com|zdnet.com"
@@ -65,7 +116,6 @@ class BochaNewsService:
             query = f"全球范围内关于AI人工智能的最新动态新闻，重点关注具有行业影响力的技术突破、产品发布、行业趋势、投资融资和政策法规等方面的内容"
             
             print(f"执行查询: {query}")
-            print(f"搜索网站范围: {include_sites}")
             
             # 调用博查Web Search API
             url = 'https://api.bochaai.com/v1/web-search'
@@ -86,6 +136,7 @@ class BochaNewsService:
                     current_articles = news_data
                     self.update_articles_cache(news_data)
                     print(f"API调用成功，返回 {len(news_data)} 条新闻数据")
+                    _sse_notify("news_updated", {"last_update": self._now_str(), "count": len(news_data)})
                     return news_data
                 else:
                     print("API调用成功但未获取到有效新闻数据")
@@ -152,7 +203,7 @@ class BochaNewsService:
                     print("未检测到火山引擎SDK，直接返回原始新闻")
                     # 兼容：直接返回原始新闻
                     news_list = []
-                    current_time = datetime.now()
+                    current_time = self._now_dt()
                     for i, page in enumerate(webpages):
                         news_item = {
                             'id': str(i + 1),
@@ -203,7 +254,7 @@ class BochaNewsService:
         import re
         blocks = [b.strip() for b in response_text.strip().split('\n\n') if b.strip()]
         news_list = []
-        current_time = datetime.now()
+        current_time = self._now_dt()
         for idx, block in enumerate(blocks):
             title, summary, category, raw_index = None, None, None, None
             for line in block.split('\n'):
@@ -260,19 +311,54 @@ class BochaNewsService:
         """启动后台刷新任务"""
         refresh_thread = threading.Thread(target=self._background_refresh_worker, daemon=True)
         refresh_thread.start()
-        print("后台刷新任务已启动")
+        print(
+            f"后台刷新任务已启动：起始时间={str(self.refresh_start_hour).zfill(2)}:"
+            f"{str(self.refresh_start_minute).zfill(2)}，间隔={self.refresh_interval_hours} 小时"
+        )
     
     def _background_refresh_worker(self):
-        """后台刷新工作线程"""
+        """后台刷新工作线程（按起始点与间隔调度）"""
         while True:
             try:
-                # 每4小时刷新一次
-                time.sleep(4 * 60 * 60)
+                # 计算距离下一次刷新时间
+                sleep_seconds = self._seconds_until_next_refresh()
+                hours_left = max(0.0, sleep_seconds / 3600.0)
+                print(f"后台刷新：距离下一次刷新约 {hours_left:.2f} 小时")
+                time.sleep(sleep_seconds)
                 print("执行后台刷新...")
                 self.get_ai_news()
             except Exception as e:
                 print(f"后台刷新任务错误: {e}")
                 time.sleep(60)
+
+    def _seconds_until_next_refresh(self) -> int:
+        """计算距离下一次刷新的秒数。按每日 refresh_start_hour 为基点，每隔 refresh_interval_hours 小时一次。"""
+        now = datetime.now(self.refresh_tz) if self.refresh_tz else datetime.now()
+        today_base = now.replace(
+            hour=self.refresh_start_hour,
+            minute=self.refresh_start_minute,
+            second=0,
+            microsecond=0
+        )
+        interval_sec = max(1, int(self.refresh_interval_hours * 3600))
+
+        if now <= today_base:
+            next_time = today_base
+        else:
+            elapsed = (now - today_base).total_seconds()
+            cycles = math.ceil(elapsed / interval_sec)
+            next_time = today_base + timedelta(seconds=cycles * interval_sec)
+
+        # 最小睡眠 60 秒，避免频繁循环
+        sleep_seconds = int(max(60, (next_time - now).total_seconds()))
+        return sleep_seconds
+
+    @staticmethod
+    def _parse_int(value: str, default: int) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return default
 
     def generate_with_volcengine(self, context):
         """使用火山引擎对内容进行二次加工"""
@@ -425,7 +511,7 @@ def get_news():
             'success': True,
             'data': current_articles,
             'count': len(current_articles),
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': bocha_service._now_str()
         })
     except Exception as e:
         return jsonify({
@@ -442,7 +528,7 @@ def refresh_news():
             'success': True,
             'data': news_data,
             'count': len(news_data),
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': bocha_service._now_str()
         })
     except Exception as e:
         return jsonify({
@@ -486,8 +572,8 @@ def get_related_articles(article_id):
         related_articles = []
         current_category = current_article.get('category', '')
         
-        for article_id, article in articles_cache.items():
-            if article_id != article_id and article.get('category') == current_category:
+        for aid, article in articles_cache.items():
+            if aid != article_id and article.get('category') == current_category:
                 related_articles.append(article)
                 if len(related_articles) >= 3:  # 最多返回3篇相关文章
                     break
@@ -506,6 +592,32 @@ def get_related_articles(article_id):
 def not_found(error):
     """404错误处理"""
     return render_template('404.html'), 404
+
+@app.route('/api/stream')
+def stream():
+    """服务端事件流（SSE）：后端刷新后立即通知前端。"""
+    def event_stream():
+        q = Queue(maxsize=10)
+        _sse_listeners.add(q)
+        # 连接建立时发送一次心跳
+        yield f"data: {json.dumps({'type':'heartbeat','ts': bocha_service._now_str()})}\n\n"
+        try:
+            while True:
+                msg = q.get()
+                yield f"data: {json.dumps(msg)}\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            try:
+                _sse_listeners.discard(q)
+            except Exception:
+                pass
+    headers = {
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    }
+    return Response(event_stream(), mimetype='text/event-stream', headers=headers)
 
 if __name__ == '__main__':
     # 启动后台刷新任务

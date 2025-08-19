@@ -1,10 +1,10 @@
 # AI新闻聚合网站
 
-这是一个基于 Flask 的 AI 新闻聚合网站，使用 Bocha AI 搜索（支持 `web-search`/`ai-search`），并可选接入火山引擎进行内容二次加工。
+这是一个基于 Flask 的 AI 新闻聚合网站，使用 Bocha AI 搜索（支持 `web-search`/`ai-search`），并可选接入火山引擎进行内容二次加工。已内置 SSE 实时通知，后端刷新后前端会立即拉取最新内容。
 
 ## 功能特点
 
-- 🔍 **智能新闻搜索**: 使用 Bocha AI Search API 获取资讯
+- 🔍 **智能新闻搜索**: 使用 Bocha AI Search API 获取资讯（可配置端点）
 - 🎯 **定向搜索**: 可配置 include/exclude 站点范围
 - 🤖 **AI内容优化（可选）**: 接入火山引擎 Ark 进行批量加工
 - 📱 **响应式设计**: 现代化的Web界面，支持移动端
@@ -15,7 +15,7 @@
 - **后端**: Flask + Python
 - **AI 搜索**: Bocha AI Search API（`BOCHA_API_URL` 可切换 `web-search`/`ai-search`）
 - **内容优化**: 火山引擎 Ark（可选）
-- **前端**: HTML5 + CSS3 + JavaScript
+- **前端**: HTML5 + CSS3 + JavaScript（SSE + 轮询兜底）
 - **部署**: Gunicorn
 
 ## 环境要求
@@ -50,11 +50,23 @@
    ```env
    # Bocha
    BOCHA_API_KEY=your_bocha_api_key
+   # 可切换 web-search / ai-search
    BOCHA_API_URL=https://api.bochaai.com/v1/ai-search
 
    # Volcengine (optional)
    VOLCENGINE_API_KEY=your_volcengine_api_key
    VOLCENGINE_ENDPOINT_ID=your_endpoint_id
+
+   # 后台刷新调度与时区
+   # 方式一（优先）：每日起始时间
+   NEWS_REFRESH_START_TIME=11:20
+   # 方式二：起始小时/分钟（0-23 / 0-59）
+   # NEWS_REFRESH_START_HOUR=11
+   # NEWS_REFRESH_START_MINUTE=20
+   # 刷新间隔（小时，>=1）
+   NEWS_REFRESH_INTERVAL_HOURS=4
+   # 时区（示例：Asia/Shanghai / UTC）
+   NEWS_REFRESH_TZ=Asia/Shanghai
    ```
 
 ## 运行项目
@@ -90,9 +102,18 @@ gunicorn -w 4 -b 0.0.0.0:5000 app:app
 - `BOCHA_API_KEY`: Bocha AI API 密钥
 - `BOCHA_API_URL`: `https://api.bochaai.com/v1/web-search` 或 `https://api.bochaai.com/v1/ai-search`
 
-### 搜索配置
+### 搜索与刷新配置
 - 默认搜索领域：AI 行业资讯（在后端可改查询词/站点范围）
-- 更新策略：后端包含定时刷新线程
+- 更新策略：
+  - 后端按 `.env` 设定的起始时间与间隔自动刷新（含时区）
+  - 前端通过 SSE 自动接收“刷新完成”事件并立即拉取最新数据
+  - 轮询兜底：默认 60 分钟，可用 `?poll=15` 或 `localStorage.setItem('poll_minutes','15')` 覆盖
+
+刷新按钮说明（默认“假刷新”）：
+- 用户点击后显示加载 10 秒，不打后端；结束后轻微调整列表顺序并更新时间，营造刷新感；
+- 开发者真实刷新开关：
+  - 控制台：`localStorage.setItem('dev_real_refresh','1'); location.reload();`
+  - 或 URL：在地址后加 `?dev=1`
 
 ## 项目结构
 

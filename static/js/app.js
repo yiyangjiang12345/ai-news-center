@@ -3,12 +3,23 @@ class AINewsApp {
     constructor() {
         this.newsData = [];
         this.currentFilter = 'all';
+        // 自动轮询间隔（毫秒）。默认 60 分钟，可在 URL 上用 ?poll=minutes 或 localStorage.poll_minutes 覆盖
+        const urlPoll = (typeof window !== 'undefined') ? parseInt(new URLSearchParams(window.location.search).get('poll') || '0', 10) : 0;
+        const lsPoll = (typeof localStorage !== 'undefined') ? parseInt(localStorage.getItem('poll_minutes') || '0', 10) : 0;
+        const pollMinutes = Number.isFinite(urlPoll) && urlPoll > 0 ? urlPoll : (Number.isFinite(lsPoll) && lsPoll > 0 ? lsPoll : 60);
+        this.autoRefreshMs = pollMinutes * 60 * 1000; // 默认每60分钟自动刷新一次
+        this.autoRefreshTimer = null;
+        // 开发者调试开关：localStorage 设置 dev_real_refresh=1 或 URL 带 ?dev=1 时启用真实刷新
+        this.devRealRefresh = (typeof localStorage !== 'undefined' && localStorage.getItem('dev_real_refresh') === '1')
+            || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('dev') === '1');
         this.init();
     }
 
     init() {
         this.bindEvents();
         this.loadNews();
+        this.startAutoRefresh();
+        this.connectSSE();
     }
 
     bindEvents() {
@@ -51,9 +62,11 @@ class AINewsApp {
         });
     }
 
-    async loadNews() {
+    async loadNews(silent = false) {
         try {
-            this.showLoading();
+            if (!silent) {
+                this.showLoading();
+            }
             
             const response = await fetch('/api/news');
             const result = await response.json();
@@ -61,7 +74,7 @@ class AINewsApp {
             if (result.success) {
                 this.newsData = result.data;
                 this.renderNews();
-                this.updateTimestamp(result.timestamp);
+                this.updateTimestamp(result.last_update || result.timestamp);
                 this.showCategoryFilter();
             } else {
                 throw new Error(result.error || '获取数据失败');
@@ -73,18 +86,37 @@ class AINewsApp {
     }
 
     async refreshNews() {
+        // 非开发模式：模拟刷新（展示加载10秒，保持数据不变但更新显示时间与顺序）
+        if (!this.devRealRefresh) {
+            this.showLoading();
+            setTimeout(() => {
+                // 轻微变动顺序让用户感觉有变化（不改变内容）
+                const fakeData = this.newsData ? this.newsData.slice() : [];
+                if (fakeData.length > 1) {
+                    const moved = fakeData.shift();
+                    fakeData.push(moved);
+                }
+                this.newsData = fakeData;
+                this.renderNews();
+                this.updateTimestamp(new Date().toISOString());
+                this.showCategoryFilter();
+                console.log('模拟刷新完成（开发模式关闭）');
+                this.resetRefreshButton();
+            }, 10000);
+            return;
+        }
+
+        // 开发模式：执行真实刷新
         try {
             this.showLoading();
-            
             const response = await fetch('/api/refresh');
             const result = await response.json();
-            
             if (result.success) {
                 this.newsData = result.data;
                 this.renderNews();
-                this.updateTimestamp(result.timestamp);
+                this.updateTimestamp(result.last_update || result.timestamp);
                 this.showCategoryFilter();
-                console.log('新闻数据已刷新');
+                console.log('新闻数据已刷新（开发模式）');
             } else {
                 throw new Error(result.error || '刷新数据失败');
             }
@@ -117,6 +149,42 @@ class AINewsApp {
         
         // 恢复刷新按钮状态
         this.resetRefreshButton();
+    }
+
+    startAutoRefresh() {
+        if (this.autoRefreshTimer) {
+            clearInterval(this.autoRefreshTimer);
+        }
+        this.autoRefreshTimer = setInterval(() => {
+            // 页面不可见时跳过，避免不必要的请求
+            if (document.hidden) return;
+            this.loadNews(true);
+        }, this.autoRefreshMs);
+    }
+
+    connectSSE() {
+        try {
+            if (this.es) {
+                try { this.es.close(); } catch (_) {}
+            }
+            this.es = new EventSource('/api/stream');
+            this.es.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data || '{}');
+                    if (data.type === 'news_updated') {
+                        // 后端刷新完成后，立即拉取最新数据
+                        this.loadNews(true);
+                    }
+                } catch (_) {}
+            };
+            this.es.onerror = () => {
+                // 断线自动重连：稍等再重连，避免频繁刷
+                try { this.es.close(); } catch (_) {}
+                setTimeout(() => this.connectSSE(), 5000);
+            };
+        } catch (err) {
+            console.warn('SSE 不可用，继续使用轮询:', err);
+        }
     }
 
     resetRefreshButton() {
